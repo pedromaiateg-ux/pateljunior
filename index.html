@@ -24,6 +24,13 @@
 @media(max-width:900px){.sidebar{transform:translateX(-100%);transition:.2s}.sidebar.open{transform:translateX(0)}.main{margin-left:0;padding:15px}.mobile{display:block}.cards{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}.three{grid-template-columns:1fr}}
 @media(max-width:600px){.cards{grid-template-columns:1fr 1fr}.formgrid{grid-template-columns:1fr}.top h1{font-size:20px}.recipe-row{grid-template-columns:1fr 1fr}.recipe-row .wide{grid-column:1/-1}}
 </style>
+
+<style>
+#adminBrandingCard{display:none}
+#adminBrandingCard input{padding:10px;border-radius:8px;border:1px solid #ccc;width:100%;box-sizing:border-box}
+#adminBrandingStatus{display:block;margin-top:8px}
+</style>
+
 </head>
 <body>
 <div id="auth"><div class="authbox"><div class="logo">🥟 Pastel<span>Pro</span></div><div style="text-align:center;color:#6b7280;margin-bottom:20px">Sistema de gestão para pastelarias</div><div class="tabs"><button id="tabLogin" class="active" onclick="authTab('login')">Entrar</button><button id="tabRegister" onclick="authTab('register')">Criar conta</button></div><div id="authError" class="error hidden"></div>
@@ -50,6 +57,20 @@
 <section id="investments" class="section"><div class="grid cards"><div class="card"><div class="label">Estoque</div><div class="value orange" id="invStock">R$ 0,00</div></div><div class="card"><div class="label">Equipamentos</div><div class="value" id="invEquip">R$ 0,00</div></div><div class="card"><div class="label">Marketing</div><div class="value" id="invMarketing">R$ 0,00</div></div><div class="card"><div class="label">Reserva</div><div class="value green" id="invReserve">R$ 0,00</div></div></div><br><div class="card"><h3>Planejamento</h3><p>O valor do estoque é calculado automaticamente. Equipamentos e marketing vêm das despesas nessas categorias.</p></div></section>
 <section id="settings" class="section"><div class="grid two"><div class="card"><h3>⚙️ Configurações</h3><div class="group"><label>Nome da pastelaria</label><input id="storeName"></div><div class="group"><label>Cor principal</label><input id="primaryColor" type="color" style="height:45px"></div><button class="btn" onclick="saveProfile()">Salvar configurações</button></div><div class="card"><h3>💾 Dados da conta</h3><p>Faça backup dos dados desta conta.</p><button class="btn gray" onclick="exportData()">Exportar backup</button> <button class="btn gray" onclick="document.getElementById('importFile').click()">Importar</button><input id="importFile" type="file" accept=".json" hidden onchange="importData(event)"><br><br><button class="btn red" onclick="clearMyData()">Apagar meus dados</button></div></div></section>
 <section id="users" class="section"><div class="card"><h2>👥 Usuários cadastrados</h2><p>Contas cadastradas no sistema.</p><div class="tablewrap"><table><thead><tr><th>Nome</th><th>E-mail</th><th>Tipo</th><th>Criado</th></tr></thead><tbody id="usersTable"></tbody></table></div></div></section>
+
+<div class="card" id="adminBrandingCard" style="margin-top:16px;">
+  <h3>🏷️ Identidade do sistema</h3>
+  <p style="margin-top:0;">Somente o administrador pode alterar o nome exibido no PastelPro.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;">
+    <label style="flex:1;min-width:220px;">
+      Nome do site
+      <input id="adminSiteNameInput" type="text" maxlength="40" placeholder="PastelPro">
+    </label>
+    <button type="button" onclick="saveAdminSiteName()">Salvar nome</button>
+  </div>
+  <small id="adminBrandingStatus"></small>
+</div>
+
 </main></div>
 <div id="modal" class="modal"><div class="modalbox"><div class="modalhead"><h2 id="modalTitle">Registro</h2><button class="close" onclick="closeModal()">×</button></div><div id="modalContent"></div></div></div><div id="toast" class="toast"></div>
 <script>
@@ -261,4 +282,276 @@ data.sales.push({id:id(),date:sDate.value,itemType:x.kind,itemId:x.id,itemName:x
   if(window.currentUser){try{renderAll()}catch(e){console.warn(e)}}
 })();
 </script>
+
+<script>
+/* PastelPro v7 — gestão profissional: custos históricos, perdas, caixa, metas,
+   formação de preço, simulação, alertas e saúde do negócio. */
+(function(){
+  const add=(k,v)=>{if(data[k]===undefined)data[k]=v};
+  function ensureV7(){
+    add('batches',[]); add('costHistory',[]); add('finishedBatches',[]); add('losses',[]);
+    add('cashClosures',[]); add('cashOpening',0); add('preparations',[]); add('stockAdjustments',[]);
+    add('priceTargets',[]); add('simulations',[]); add('v7Version',7);
+  }
+  ensureV7();
+
+  /* Corrige compras novas: toda compra cria seu próprio lote e histórico de preço.
+     O preço médio do cadastro continua servindo para consulta; produção/consumo usa FIFO. */
+  window.savePurchase=function(e){
+    e.preventDefault();
+    const i=data.ingredients.find(x=>x.id===bIngredient.value), q=+bQty.value||0, t=+bTotal.value||0;
+    if(!i||q<=0||t<0)return;
+    const unit=t/q, bid=id(), date=bDate.value||today();
+    data.batches.push({id:bid,purchaseId:id(),ingredientId:i.id,date,qtyOriginal:q,remaining:q,unitCost:unit,total:t,supplier:bSupplier?.value||'',expiry:document.getElementById('bExpiry')?.value||''});
+    const purchaseId=data.batches[data.batches.length-1].purchaseId;
+    data.purchases.push({id:purchaseId,batchId:bid,date,ingredientId:i.id,product:i.name,qty:q,total:t,unitCost:unit,supplier:bSupplier?.value||'',expiry:document.getElementById('bExpiry')?.value||''});
+    data.costHistory.push({id:id(),ingredientId:i.id,date,unitCost:unit,purchaseId});
+    const oldQty=+i.qty||0, oldCost=+i.cost||0;
+    i.cost=(oldQty*oldCost+q*unit)/(oldQty+q||1); i.qty=oldQty+q;
+    if(document.getElementById('bExpiry'))i.expiry=document.getElementById('bExpiry').value||i.expiry||'';
+    saveData();closeModal();renderAll();toast(`Compra registrada. Lote criado a ${money(unit)}/${i.unit}`);
+  };
+
+  function money2(n){return money(+n||0)}
+  function validSales(){return (data.sales||[]).filter(s=>!s.cancelled)}
+  function monthKey(d){return String(d||'').slice(0,7)}
+  function sum(a,f){return a.reduce((x,y)=>x+(+f(y)||0),0)}
+  function fixedExpenses(){return sum(data.expenses||[],x=>x.value)}
+  function salesRevenue(){return sum(validSales(),x=>x.total)}
+  function salesCost(){return sum(validSales(),x=>x.cost)}
+  function salesFees(){return sum(validSales(),x=>x.fee)}
+  function lossCost(){return sum(data.losses||[],x=>x.cost)}
+  function marketingCost(){return sum(data.consumption||[],x=>typeof consumptionCost==='function'?consumptionCost(x):x.cost)}
+  function netProfit(sales=validSales(), expenses=data.expenses||[], losses=data.losses||[], cons=data.consumption||[]){
+    return sum(sales,x=>x.total)-sum(sales,x=>x.cost+x.fee)-sum(expenses,x=>x.value)-sum(losses,x=>x.cost)-sum(cons,x=>typeof consumptionCost==='function'?consumptionCost(x):x.cost);
+  }
+  function stockValue(){return sum(data.ingredients||[],i=>(+i.qty||0)*(+i.cost||0))}
+  function currentMargin(){let r=salesRevenue(), c=salesCost()+salesFees(); return r?((r-c)/r*100):0}
+  function avgTicket(){let s=validSales();return s.length?salesRevenue()/s.length:0}
+  function renderV7Dashboard(){
+    const box=document.getElementById('v7Dashboard'); if(!box)return;
+    const r=salesRevenue(), c=salesCost(), f=salesFees(), ex=fixedExpenses(), l=lossCost(), mk=marketingCost(), p=r-c-f-ex-l-mk;
+    const margin=r?((r-c-f)/r*100):0;
+    const alerts=[];
+    (data.ingredients||[]).forEach(i=>{if(+i.min>0 && +i.qty<=+i.min)alerts.push(`🟡 Estoque baixo: ${esc(i.name)}`); if(i.expiry && i.expiry<=today())alerts.push(`🔴 Validade: ${esc(i.name)}`);});
+    (data.pastels||[]).forEach(x=>{let cc=recipeCost(x.ingredients||x.recipe||[]),m=x.price?((x.price-cc)/x.price*100):0;if(x.price<cc)alerts.push(`🔴 ${esc(x.name)} está sendo vendido abaixo do custo atual`);else if(m<30)alerts.push(`🟠 Margem baixa: ${esc(x.name)} (${m.toFixed(1)}%)`)});
+    box.innerHTML=`<div class="grid cards">
+      <div class="card"><div class="label">Faturamento</div><div class="value">${money2(r)}</div></div>
+      <div class="card"><div class="label">Lucro líquido estimado</div><div class="value ${p>=0?'profit-positive':'profit-negative'}">${money2(p)}</div></div>
+      <div class="card"><div class="label">Margem de contribuição</div><div class="value">${margin.toFixed(1)}%</div></div>
+      <div class="card"><div class="label">Ticket médio</div><div class="value">${money2(avgTicket())}</div></div>
+      <div class="card"><div class="label">Estoque em R$</div><div class="value">${money2(stockValue())}</div></div>
+      <div class="card"><div class="label">Perdas</div><div class="value ${l>0?'profit-negative':''}">${money2(l)}</div></div>
+    </div><br><div class="card"><h3>❤️ Saúde da Pastelaria</h3>
+      <p>${margin>=40?'🟢 Margem saudável':margin>=25?'🟡 Margem que merece atenção':'🔴 Margem baixa — revise preços/custos'}</p>
+      <p>${l<=r*.03?'🟢 Perdas controladas':l<=r*.05?'🟡 Perdas acima do ideal':'🔴 Perdas muito altas'}</p>
+      <p>${p>=0?'🟢 Operação positiva':'🔴 Resultado negativo no período'}</p>
+      ${alerts.length?'<hr><b>Alertas</b>'+alerts.slice(0,12).map(a=>`<p>${a}</p>`).join(''):'<p>🟢 Nenhum alerta crítico.</p>'}
+    </div>`;
+  }
+
+  function openPriceCalc(){
+    const ps=data.pastels||[]; if(!ps.length)return toast('Cadastre um pastel primeiro');
+    openModal('💰 Formação de preço',`<form onsubmit="event.preventDefault();calcPrice()"><div class="formgrid"><div class="group"><label>Pastel</label><select id="fpPastel">${ps.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select></div><div class="group"><label>Margem desejada (%)</label><input id="fpMargin" type="number" step=".1" min="0" max="99" value="40"></div></div><div class="costbox" id="fpResult">Informe a margem.</div>${formButtons('Calcular')}</form>`);
+    window.calcPrice=function(){let x=ps.find(a=>a.id===fpPastel.value),c=recipeCost(x.ingredients||x.recipe||[]),m=(+fpMargin.value||0)/100,price=m<1?c/(1-m):0;fpResult.innerHTML=`Custo atual: <b>${money(c)}</b><br>Preço sugerido para ${(+fpMargin.value||0).toFixed(1)}% de margem: <b>${money(price)}</b><br>Lucro unitário: <b>${money(price-c)}</b>`}
+  }
+  function openSimulation(){
+    openModal('🔮 Simulador de cenários',`<form onsubmit="event.preventDefault();runSim()"><div class="formgrid"><div class="group"><label>Vendas por dia</label><input id="simQty" type="number" min="0" value="20"></div><div class="group"><label>Preço médio por pastel</label><input id="simPrice" type="number" step=".01" value="15"></div><div class="group"><label>Dias de funcionamento/mês</label><input id="simDays" type="number" min="1" max="31" value="26"></div><div class="group"><label>Custo médio por pastel</label><input id="simCost" type="number" step=".01" value="${(data.avgPrice?Math.max(0,data.avgPrice*.55):5).toFixed(2)}"></div><div class="group"><label>Despesas fixas/variáveis mensais</label><input id="simExp" type="number" step=".01" value="${fixedExpenses().toFixed(2)}"></div></div><div class="costbox" id="simResult">Preencha os dados.</div>${formButtons('Simular')}</form>`);
+    window.runSim=function(){let q=+simQty.value||0,pr=+simPrice.value||0,d=+simDays.value||0,c=+simCost.value||0,e=+simExp.value||0,rev=q*pr*d,vc=q*c*d,profit=rev-vc-e;simResult.innerHTML=`Faturamento projetado: <b>${money(rev)}</b><br>Custo dos produtos: <b>${money(vc)}</b><br>Despesas: <b>${money(e)}</b><br><strong>Lucro projetado: ${money(profit)}</strong><br>Margem: <b>${rev?(profit/rev*100).toFixed(1):0}%</b>`}
+  }
+  function openGoal(){
+    const cur=+data.goal||0;openModal('🎯 Meta de lucro mensal',`<form onsubmit="event.preventDefault();data.goal=+gGoal.value||0;saveData();closeModal();renderAll();toast('Meta atualizada')"><div class="group"><label>Meta de lucro mensal</label><input id="gGoal" type="number" step=".01" min="0" value="${cur}"></div>${formButtons('Salvar meta')}</form>`)
+  }
+  function renderGoal(){const el=document.getElementById('v7Goal');if(!el)return;let goal=+data.goal||0,p=netProfit();let pct=goal?Math.max(0,Math.min(100,p/goal*100)):0;el.innerHTML=`<div class="card"><h3>🎯 Meta de lucro</h3><p>${money2(p)} / ${money2(goal)}</p><div style="height:14px;background:#eee;border-radius:99px;overflow:hidden"><div style="width:${pct}%;height:100%;background:var(--primary)"></div></div><p>${pct.toFixed(1)}% atingido</p><button class="btn" onclick="openGoal()">Definir meta</button></div>`}
+  function renderPriceHistory(){const el=document.getElementById('v7HistoryTable');if(!el)return;let rows=[];(data.costHistory||[]).forEach(h=>{let i=data.ingredients.find(x=>x.id===h.ingredientId);if(i)rows.push({date:h.date,name:i.name,cost:h.unitCost})});rows.sort((a,b)=>b.date.localeCompare(a.date));el.innerHTML=rows.map((x,idx)=>{let older=rows.slice(idx+1).find(y=>y.name===x.name),change=older?((x.cost/older.cost-1)*100):0;return`<tr><td>${x.date}</td><td>${esc(x.name)}</td><td>${money2(x.cost)}</td><td>${older?change.toFixed(1)+'%':'—'}</td></tr>`}).join('')||'<tr><td colspan="4" class="empty">Nenhum histórico.</td></tr>'}
+  function renderCompare(){const el=document.getElementById('v7Compare');if(!el)return;let cur=today().slice(0,7),prev=new Date(new Date().getFullYear(),new Date().getMonth()-1,1).toISOString().slice(0,7);function stats(m){let s=validSales().filter(x=>monthKey(x.date)===m),ex=(data.expenses||[]).filter(x=>monthKey(x.date)===m),ls=(data.losses||[]).filter(x=>monthKey(x.date)===m),co=(data.consumption||[]).filter(x=>monthKey(x.date)===m);return{r:sum(s,x=>x.total),q:sum(s,x=>x.qty),p:netProfit(s,ex,ls,co)}}let a=stats(cur),b=stats(prev);const delta=(x,y)=>y?((x/y-1)*100).toFixed(1)+'%':'—';el.innerHTML=`<div class="card"><h3>📈 Comparação</h3><table><thead><tr><th></th><th>${prev}</th><th>${cur}</th><th>Variação</th></tr></thead><tbody><tr><td>Faturamento</td><td>${money2(b.r)}</td><td>${money2(a.r)}</td><td>${delta(a.r,b.r)}</td></tr><tr><td>Quantidade</td><td>${b.q}</td><td>${a.q}</td><td>${delta(a.q,b.q)}</td></tr><tr><td>Lucro líquido</td><td>${money2(b.p)}</td><td>${money2(a.p)}</td><td>${delta(a.p,b.p)}</td></tr></tbody></table></div>`}
+
+  function addUI(){
+    if(document.getElementById('v7Panel'))return;
+    const nav=document.getElementById('nav');
+    nav.insertAdjacentHTML('beforeend',`<button onclick="showSection('v7Panel',this)">🧠 Gestão</button><button onclick="showSection('v7History',this)">📈 Custos</button><button onclick="showSection('v7CompareSection',this)">📊 Comparar</button>`);
+    document.querySelector('.main').insertAdjacentHTML('beforeend',`
+      <section id="v7Panel" class="section"><div class="toolbar"><button class="btn" onclick="openPriceCalc()">💰 Formação de preço</button><button class="btn blue" onclick="openSimulation()">🔮 Simular cenário</button><button class="btn" onclick="openGoal()">🎯 Meta</button></div><div id="v7Dashboard"></div><div id="v7Goal"></div></section>
+      <section id="v7History" class="section"><div class="card"><h3>📈 Histórico de preços por compra</h3><p class="hint">Cada compra fica congelada no próprio lote. Produções antigas não mudam quando o ingrediente fica mais caro.</p><div class="tablewrap"><table><thead><tr><th>Data</th><th>Ingrediente</th><th>Custo</th><th>Variação</th></tr></thead><tbody id="v7HistoryTable"></tbody></table></div></div></section>
+      <section id="v7CompareSection" class="section"><div id="v7Compare"></div></section>`);
+  }
+  const oldRenderAllV7=window.renderAll;
+  window.renderAll=function(){ensureV7();addUI();oldRenderAllV7();renderV7Dashboard();renderGoal();renderPriceHistory();renderCompare()};
+  const oldShowV7=window.showSection;
+  window.showSection=function(s,b){oldShowV7(s,b);if(s==='v7Panel'){renderV7Dashboard();renderGoal()}if(s==='v7History')renderPriceHistory();if(s==='v7CompareSection')renderCompare()};
+  addUI(); if(window.currentUser){try{renderAll()}catch(e){console.warn('PastelPro v7',e)}}
+})();
+</script>
+<script>
+/* PastelPro v8 — revisão completa e integrada */
+(function(){
+  const add=(k,v)=>{if(data[k]===undefined)data[k]=v};
+  add('paymentRates',{Pix:0,Dinheiro:0,Débito:1.99,Crédito:3.99,iFood:12,Delivery:0,Outro:0});
+  add('goals',{profit:0,revenue:0,qty:0}); add('simulations',[]); add('v8Version',8);
+  function n(v){return +v||0} function arr(k){return Array.isArray(data[k])?data[k]:[]}
+  function activeSales(){return arr('sales').filter(x=>!x.cancelled)}
+  function sum(a,f){return a.reduce((s,x)=>s+n(f(x)),0)}
+  function rev(s=activeSales()){return sum(s,x=>x.total)}
+  function fees(s=activeSales()){return sum(s,x=>x.fee)}
+  function cost(s=activeSales()){return sum(s,x=>x.cost)}
+  function expenses(ds=arr('expenses')){return sum(ds,x=>x.value)}
+  function losses(ls=arr('losses')){return sum(ls,x=>x.cost)}
+  function marketing(cs=arr('consumption')){return sum(cs,x=>n(x.cost))}
+  function net(s=activeSales(),d=arr('expenses'),l=arr('losses'),m=arr('consumption')){return rev(s)-cost(s)-fees(s)-expenses(d)-losses(l)-marketing(m)}
+  function stockValue(){return sum(arr('ingredients'),i=>n(i.qty)*n(i.cost))}
+  function month(d){return String(d||'').slice(0,7)}
+  function fmtPct(x){return n(x).toFixed(1)+'%'}
+  function monthStats(m){let s=activeSales().filter(x=>month(x.date)===m),e=arr('expenses').filter(x=>month(x.date)===m),l=arr('losses').filter(x=>month(x.date)===m),c=arr('consumption').filter(x=>month(x.date)===m);let r=rev(s),mc=r-cost(s)-fees(s);return{r,q:sum(s,x=>x.qty),c:cost(s),f:fees(s),e:expenses(e),l:losses(l),m:marketing(c),p:net(s,e,l,c),margin:r?mc/r*100:0}}
+  function getHistoricalPastelCost(pid){
+    let batches=arr('finishedBatches').filter(b=>b.pastelId===pid && n(b.qtyOriginal)>0);
+    if(batches.length)return sum(batches,b=>n(b.costUnit))/batches.length;
+    let p=data.pastels.find(x=>x.id===pid);return p?recipeCost(p.ingredients||p.recipe||[]):0;
+  }
+  function esc2(s){return typeof esc==='function'?esc(s):String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+  function card(label,value,cls=''){return `<div class="card"><div class="label">${label}</div><div class="value ${cls}">${value}</div></div>`}
+
+  function renderCompleteDashboard(){
+    let el=document.getElementById('completeDash');if(!el)return;
+    let s=activeSales(),r=rev(s),c=cost(s),f=fees(s),e=expenses(),l=losses(),m=marketing(),p=net(s),margin=r?((r-c-f)/r*100):0;
+    let todayS=s.filter(x=>x.date===today()), todayP=net(todayS,arr('expenses').filter(x=>x.date===today()),arr('losses').filter(x=>x.date===today()),arr('consumption').filter(x=>x.date===today()));
+    let products={};s.forEach(x=>{let k=x.itemName;products[k]??={q:0,p:0};products[k].q+=n(x.qty);products[k].p+=n(x.total)-n(x.cost)-n(x.fee)});
+    let best=Object.entries(products).sort((a,b)=>b[1].q-a[1].q)[0],prof=Object.entries(products).sort((a,b)=>b[1].p-a[1].p)[0];
+    let alerts=[];
+    arr('ingredients').forEach(i=>{if(n(i.min)>0&&n(i.qty)<=n(i.min))alerts.push('🟡 Estoque baixo: '+esc2(i.name));if(i.expiry&&i.expiry<today())alerts.push('🔴 Vencido: '+esc2(i.name));else if(i.expiry){let days=Math.ceil((new Date(i.expiry+'T00:00:00')-new Date(today()+'T00:00:00'))/86400000);if(days<=7)alerts.push('🟠 Validade próxima: '+esc2(i.name)+' ('+days+' dias)')}});
+    arr('pastels').forEach(x=>{let cc=getHistoricalPastelCost(x.id),mg=x.price?((x.price-cc)/x.price*100):0;if(x.price<cc)alerts.push('🔴 '+esc2(x.name)+' abaixo do custo histórico disponível');else if(mg<30)alerts.push('🟠 Margem baixa: '+esc2(x.name)+' ('+fmtPct(mg)+')')});
+    let goal=n(data.goals.profit), gp=goal?Math.max(0,Math.min(100,p/goal*100)):0;
+    el.innerHTML=`<div class="grid cards">${card('Faturamento',money(r),'orange')}${card('Lucro líquido',money(p),p>=0?'green':'red')}${card('Margem de contribuição',fmtPct(margin))}${card('Ticket médio',money(s.length?r/s.length:0))}${card('Custo das vendas',money(c))}${card('Taxas',money(f))}${card('Despesas',money(e))}${card('Perdas + marketing',money(l+m))}${card('Estoque em R$',money(stockValue()))}${card('Vendas',sum(s,x=>x.qty))}</div>
+    <br><div class="grid two"><div class="card"><h3>📅 Hoje</h3><p>Faturamento: <b>${money(rev(todayS))}</b></p><p>Lucro estimado: <b>${money(todayP)}</b></p><p>Itens vendidos: <b>${sum(todayS,x=>x.qty)}</b></p></div><div class="card"><h3>🏆 Desempenho</h3><p>Mais vendido: <b>${best?esc2(best[0]):'—'}</b></p><p>Mais lucrativo: <b>${prof?esc2(prof[0]):'—'}</b></p><p>Ticket médio: <b>${money(s.length?r/s.length:0)}</b></p></div></div>
+    <br><div class="grid two"><div class="card"><h3>🎯 Meta de lucro</h3><p>${money(p)} / ${money(goal)}</p><div style="height:14px;background:#eee;border-radius:99px;overflow:hidden"><div style="width:${gp}%;height:100%;background:var(--primary)"></div></div><p>${fmtPct(gp)} atingido</p></div><div class="card"><h3>❤️ Saúde da Pastelaria</h3><p>${margin>=40?'🟢 Margem saudável':margin>=25?'🟡 Margem merece atenção':'🔴 Margem baixa'}</p><p>${r&&l/r<=.03?'🟢 Perdas controladas':r&&l/r<=.05?'🟡 Perdas acima do ideal':'🔴 Perdas altas'}</p><p>${p>=0?'🟢 Resultado positivo':'🔴 Resultado negativo'}</p></div></div>
+    <br><div class="card"><h3>⚠️ Alertas</h3>${alerts.length?alerts.slice(0,20).map(x=>'<p>'+x+'</p>').join(''):'<p>🟢 Nenhum alerta importante.</p>'}</div>`;
+  }
+
+  function renderDetailedPurchases(){let el=document.getElementById('detailPurchases');if(!el)return;let rows=arr('purchases').slice().reverse().map(p=>{let b=arr('batches').find(x=>x.id===p.batchId),i=data.ingredients.find(x=>x.id===p.ingredientId);return `<tr><td>${p.date}</td><td>${esc2(i?.name||p.product)}</td><td>${p.qty}</td><td>${money(p.unitCost)}</td><td>${money(p.total)}</td><td>${esc2(p.supplier||'—')}</td><td>${p.expiry||'—'}</td><td>${b?b.remaining.toFixed(3):'—'}</td></tr>`}).join('');el.innerHTML=rows||'<tr><td colspan="8" class="empty">Nenhuma compra registrada.</td></tr>'}
+
+  function renderLossDetail(){let el=document.getElementById('detailLosses');if(!el)return;let rows=arr('losses').slice().reverse().map(x=>`<tr><td>${x.date}</td><td>${x.type==='pastel'?'🥟 Pastel':'🥩 Ingrediente'}</td><td>${esc2(x.pastelName||x.ingredientName||'—')}</td><td>${x.qty}</td><td>${esc2(x.reason)}</td><td>${money(x.cost)}</td><td>${x.batchUsage?.length||0} lote(s)</td></tr>`).join('');el.innerHTML=rows||'<tr><td colspan="7" class="empty">Nenhuma perda.</td></tr>'}
+
+  function renderCompareComplete(){let el=document.getElementById('completeCompare');if(!el)return;let cur=today().slice(0,7),prev=new Date(new Date().getFullYear(),new Date().getMonth()-1,1).toISOString().slice(0,7),a=monthStats(cur),b=monthStats(prev);const d=(x,y)=>y?((x/y-1)*100).toFixed(1)+'%':'—';el.innerHTML=`<div class="card"><h3>📈 ${prev} × ${cur}</h3><div class="tablewrap"><table><thead><tr><th>Indicador</th><th>${prev}</th><th>${cur}</th><th>Variação</th></tr></thead><tbody>${[['Faturamento',b.r,a.r],['Quantidade',b.q,a.q],['Custo das vendas',b.c,a.c],['Taxas',b.f,a.f],['Despesas',b.e,a.e],['Perdas',b.l,a.l],['Marketing',b.m,a.m],['Lucro líquido',b.p,a.p],['Margem',b.margin,a.margin]].map((r,i)=>`<tr><td>${r[0]}</td><td>${i===8?fmtPct(r[1]):(typeof r[1]==='number'&&i!==1?money(r[1]):r[1])}</td><td>${i===8?fmtPct(r[2]):(typeof r[2]==='number'&&i!==1?money(r[2]):r[2])}</td><td>${i===8?d(r[2],r[1]):d(r[2],r[1])}</td></tr>`).join('')}</tbody></table></div></div>`}
+
+  function openPayments(){let keys=Object.keys(data.paymentRates);openModal('💳 Formas de pagamento e taxas',`<form onsubmit="savePayments(event)"><p class="hint">Informe a taxa percentual cobrada por cada meio. O PastelPro calcula a taxa automaticamente na venda.</p><div class="formgrid">${keys.map(k=>`<div class="group"><label>${esc2(k)} (%)</label><input id="rate_${k.replace(/[^a-zA-Z0-9]/g,'_')}" type="number" step=".01" min="0" value="${n(data.paymentRates[k])}"></div>`).join('')}</div>${formButtons('Salvar taxas')}</form>`)}
+  window.savePayments=function(e){e.preventDefault();Object.keys(data.paymentRates).forEach(k=>{let id='rate_'+k.replace(/[^a-zA-Z0-9]/g,'_');if(document.getElementById(id))data.paymentRates[k]=n(document.getElementById(id).value)});saveData();closeModal();renderAll();toast('Taxas atualizadas')}
+
+  function openSimComplete(){openModal('🔮 Simulador completo',`<form onsubmit="event.preventDefault();runCompleteSim()"><div class="formgrid"><div class="group"><label>Vendas por dia</label><input id="csQty" type="number" min="0" value="30"></div><div class="group"><label>Preço médio</label><input id="csPrice" type="number" step=".01" value="15"></div><div class="group"><label>Custo unitário</label><input id="csCost" type="number" step=".01" value="5"></div><div class="group"><label>Taxa média (%)</label><input id="csFee" type="number" step=".01" value="2"></div><div class="group"><label>Dias/mês</label><input id="csDays" type="number" min="1" max="31" value="26"></div><div class="group"><label>Despesas fixas/mês</label><input id="csFixed" type="number" step=".01" value="${expenses().toFixed(2)}"></div><div class="group"><label>Perdas estimadas (%)</label><input id="csLoss" type="number" step=".1" value="2"></div></div><div class="costbox" id="csResult">Preencha os dados.</div>${formButtons('Simular')}</form>`)}
+  window.runCompleteSim=function(){let q=n(csQty.value),pr=n(csPrice.value),c=n(csCost.value),fee=n(csFee.value)/100,d=n(csDays.value),fx=n(csFixed.value),lp=n(csLoss.value)/100,r=q*pr*d,vc=q*c*d,ft=r*fee,loss=r*lp,p=r-vc-ft-fx-loss;data.simulations.push({id:id(),date:today(),q,pr,c,d,fx,fee,loss,revenue:r,profit:p});saveData();csResult.innerHTML=`Faturamento: <b>${money(r)}</b><br>Custo: <b>${money(vc)}</b><br>Taxas: <b>${money(ft)}</b><br>Perdas: <b>${money(loss)}</b><br>Despesas: <b>${money(fx)}</b><br><strong>Lucro projetado: ${money(p)}</strong><br>Margem líquida: <b>${fmtPct(r?p/r*100:0)}</b>`}
+
+  function openPriceComplete(){let ps=arr('pastels');if(!ps.length)return toast('Cadastre um pastel primeiro');openModal('🧮 Formação automática de preço',`<form onsubmit="event.preventDefault();calcCompletePrice()"><div class="formgrid"><div class="group"><label>Pastel</label><select id="cpPastel">${ps.map(p=>`<option value="${p.id}">${esc2(p.name)}</option>`).join('')}</select></div><div class="group"><label>Margem desejada (%)</label><input id="cpMargin" type="number" step=".1" min="0" max="99" value="40"></div><div class="group"><label>Taxa média (%)</label><input id="cpFee" type="number" step=".1" min="0" value="2"></div><div class="group"><label>Preço arredondado?</label><select id="cpRound"><option value="none">Não</option><option value="05">Para R$ 0,05</option><option value="50">Para R$ 0,50</option><option value="1">Para R$ 1,00</option></select></div></div><div class="costbox" id="cpResult">Informe os dados.</div>${formButtons('Calcular')}</form>`)}
+  window.calcCompletePrice=function(){let p=data.pastels.find(x=>x.id===cpPastel.value),c=getHistoricalPastelCost(p.id),m=n(cpMargin.value)/100,fee=n(cpFee.value)/100,base=m<1?c/(1-m):0,price=fee<1?base/(1-fee):0;let r=cpRound.value;if(r!=='none'){let step=r==='05'?.05:r==='50'?.5:1;price=Math.ceil(price/step-1e-9)*step}cpResult.innerHTML=`Custo histórico de referência: <b>${money(c)}</b><br>Preço sugerido: <b>${money(price)}</b><br>Lucro após custo e taxa: <b>${money(price-c-price*fee)}</b><br>Margem líquida aproximada: <b>${fmtPct(price?(price-c-price*fee)/price*100:0)}</b>`}
+
+  function openGoalComplete(){openModal('🎯 Metas',`<form onsubmit="saveGoalComplete(event)"><div class="formgrid"><div class="group"><label>Meta de lucro mensal</label><input id="ggProfit" type="number" step=".01" min="0" value="${n(data.goals.profit)}"></div><div class="group"><label>Meta de faturamento mensal</label><input id="ggRevenue" type="number" step=".01" min="0" value="${n(data.goals.revenue)}"></div><div class="group"><label>Meta de pastéis/itens vendidos</label><input id="ggQty" type="number" min="0" value="${n(data.goals.qty)}"></div></div>${formButtons('Salvar metas')}</form>`)}
+  window.saveGoalComplete=function(e){e.preventDefault();data.goals={profit:n(ggProfit.value),revenue:n(ggRevenue.value),qty:n(ggQty.value)};saveData();closeModal();renderAll();toast('Metas salvas')}
+
+  function addCompleteUI(){if(document.getElementById('completeDash'))return;let nav=document.getElementById('nav'),main=document.querySelector('.main');nav.insertAdjacentHTML('beforeend',`<button onclick="showSection('complete',this)">📊 Dashboard Pro</button><button onclick="showSection('completePurchases',this)">🧾 Compras</button><button onclick="showSection('completeLosses',this)">🗑️ Perdas</button><button onclick="showSection('completeCompareSection',this)">📈 Comparar</button><button onclick="showSection('completeTools',this)">🛠️ Ferramentas</button>`);main.insertAdjacentHTML('beforeend',`
+<section id="complete" class="section"><div class="toolbar"><button class="btn" onclick="openPriceComplete()">🧮 Formar preço</button><button class="btn blue" onclick="openSimComplete()">🔮 Simular</button><button class="btn" onclick="openGoalComplete()">🎯 Metas</button><button class="btn" onclick="openPayments()">💳 Taxas</button></div><div id="completeDash"></div></section>
+<section id="completePurchases" class="section"><div class="card"><h2>🧾 Histórico detalhado de compras</h2><p class="hint">Cada compra é um lote independente. O preço de uma compra nova não altera o custo das produções antigas.</p><div class="tablewrap"><table><thead><tr><th>Data</th><th>Ingrediente</th><th>Qtd.</th><th>Custo unit.</th><th>Total</th><th>Fornecedor</th><th>Validade</th><th>Saldo do lote</th></tr></thead><tbody id="detailPurchases"></tbody></table></div></div></section>
+<section id="completeLosses" class="section"><div class="card"><h2>🗑️ Perdas detalhadas</h2><p class="hint">Pastéis perdidos usam o custo do lote de produção. Ingredientes perdidos usam FIFO dos lotes de compra.</p><div class="grid cards"><div class="card"><div class="label">Custo total perdido</div><div class="value red" id="detailLossTotal">R$ 0,00</div></div><div class="card"><div class="label">Quantidade de registros</div><div class="value" id="detailLossCount">0</div></div></div><br><div class="tablewrap"><table><thead><tr><th>Data</th><th>Tipo</th><th>Item</th><th>Qtd.</th><th>Motivo</th><th>Custo</th><th>Lotes</th></tr></thead><tbody id="detailLosses"></tbody></table></div></div></section>
+<section id="completeCompareSection" class="section"><div id="completeCompare"></div></section>
+<section id="completeTools" class="section"><div class="grid two"><div class="card"><h2>🛠️ Ferramentas</h2><button class="btn" onclick="openPriceComplete()">🧮 Formação de preço</button> <button class="btn blue" onclick="openSimComplete()">🔮 Simulação</button><br><br><button class="btn" onclick="openGoalComplete()">🎯 Metas</button> <button class="btn" onclick="openPayments()">💳 Taxas</button></div><div class="card"><h2>📌 Regras do custo</h2><p>1. Compra cria lote.</p><p>2. Produção consome FIFO.</p><p>3. Custo da produção fica congelado.</p><p>4. Compra nova não altera produção antiga.</p><p>5. Venda e perda consomem o lote produzido.</p></div></div></section>`)}
+
+  const oldRenderAll=window.renderAll;
+  window.renderAll=function(){addCompleteUI();oldRenderAll();renderCompleteDashboard();renderDetailedPurchases();renderLossDetail();renderCompareComplete();let lt=document.getElementById('detailLossTotal');if(lt)lt.textContent=money(losses());let lc=document.getElementById('detailLossCount');if(lc)lc.textContent=arr('losses').length};
+  const oldShow=window.showSection;
+  window.showSection=function(s,b){oldShow(s,b);if(s==='complete')renderCompleteDashboard();if(s==='completePurchases')renderDetailedPurchases();if(s==='completeLosses')renderLossDetail();if(s==='completeCompareSection')renderCompareComplete()};
+  addCompleteUI();if(window.currentUser){try{renderAll()}catch(e){console.error('PastelPro v8',e)}}
+})();
+</script>
+
+
+<script>
+(function(){
+  const BRANDING_KEY = 'pastelpro_site_name';
+  const DEFAULT_NAME = 'PastelPro';
+
+  function getSiteName(){
+    return localStorage.getItem(BRANDING_KEY) || DEFAULT_NAME;
+  }
+
+  function isAdmin(){
+    // Uses the existing app's role/auth state when available.
+    try {
+      if (typeof currentUser !== 'undefined' && currentUser) {
+        return currentUser.role === 'admin' || currentUser.isAdmin === true;
+      }
+    } catch(e){}
+    try {
+      if (typeof state !== 'undefined' && state && state.currentUser) {
+        return state.currentUser.role === 'admin' || state.currentUser.isAdmin === true;
+      }
+    } catch(e){}
+    try {
+      const raw = localStorage.getItem('pastelpro_current_user') || localStorage.getItem('currentUser');
+      if(raw){
+        const u = JSON.parse(raw);
+        return u && (u.role === 'admin' || u.isAdmin === true);
+      }
+    } catch(e){}
+    // If this build has no auth state, do not expose the setting.
+    return false;
+  }
+
+  function applySiteName(){
+    const name = getSiteName();
+    document.title = name;
+    document.querySelectorAll('[data-site-name]').forEach(el => el.textContent = name);
+
+    // Conservative replacement of visible standalone "PastelPro" branding.
+    document.querySelectorAll('h1,h2,h3,.logo,.brand,.app-title').forEach(el => {
+      if ((el.textContent || '').trim() === DEFAULT_NAME) el.textContent = name;
+    });
+  }
+
+  function refreshAdminBrandingUI(){
+    const card = document.getElementById('adminBrandingCard');
+    const input = document.getElementById('adminSiteNameInput');
+    if(!card) return;
+    if(isAdmin()){
+      card.style.display = '';
+      if(input) input.value = getSiteName();
+    } else {
+      card.style.display = 'none';
+    }
+  }
+
+  window.saveAdminSiteName = function(){
+    if(!isAdmin()){
+      alert('Apenas o administrador pode alterar o nome do site.');
+      return;
+    }
+    const input = document.getElementById('adminSiteNameInput');
+    const status = document.getElementById('adminBrandingStatus');
+    const name = (input && input.value || '').trim();
+
+    if(!name){
+      alert('Digite um nome para o site.');
+      return;
+    }
+    if(name.length > 40){
+      alert('O nome pode ter no máximo 40 caracteres.');
+      return;
+    }
+
+    localStorage.setItem(BRANDING_KEY, name);
+    applySiteName();
+    if(status) status.textContent = 'Nome atualizado com sucesso.';
+  };
+
+  // Make the setting available after the existing app initializes.
+  document.addEventListener('DOMContentLoaded', function(){
+    applySiteName();
+    refreshAdminBrandingUI();
+    setTimeout(function(){
+      applySiteName();
+      refreshAdminBrandingUI();
+    }, 500);
+    setTimeout(function(){
+      applySiteName();
+      refreshAdminBrandingUI();
+    }, 1500);
+  });
+})();
+</script>
+
 </body></html>
